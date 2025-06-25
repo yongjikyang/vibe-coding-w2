@@ -1,3 +1,9 @@
+"""
+FastAPI 애플리케이션 메인 모듈
+
+PR 테스트 업데이트: GitHub Actions 워크플로우 테스트용 주석 추가
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat
