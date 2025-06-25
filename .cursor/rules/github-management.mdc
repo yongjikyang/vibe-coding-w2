@@ -1,8 +1,3 @@
----
-description:
-globs:
-alwaysApply: false
----
 # GitHub 관리 룰 (GitHub Management Rules)
 
 ## 브랜치 전략 (Branch Strategy)
