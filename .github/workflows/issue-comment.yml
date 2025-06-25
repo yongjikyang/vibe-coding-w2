@@ -1,0 +1,267 @@
+name: 💬 이슈 자동 댓글
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  issue-comment:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 🔍 이슈 분석
+      id: analyze
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const issue = context.payload.issue;
+          const title = issue.title.toLowerCase();
+          const body = issue.body || '';
+          const labels = issue.labels.map(label => label.name);
+          
+          // 이슈 타입 분석
+          let issueType = 'general';
+          let priority = 'medium';
+          let estimatedTime = '1-2일';
+          
+          if (title.includes('[bug]') || title.includes('bug') || title.includes('error') || title.includes('문제')) {
+            issueType = 'bug';
+            priority = 'high';
+            estimatedTime = '0.5-1일';
+          } else if (title.includes('[feature]') || title.includes('기능') || title.includes('추가')) {
+            issueType = 'feature';
+            priority = 'medium';
+            estimatedTime = '2-5일';
+          } else if (title.includes('[task]') || title.includes('작업') || title.includes('개발')) {
+            issueType = 'task';
+            priority = 'medium';
+            estimatedTime = '1-3일';
+          } else if (title.includes('[docs]') || title.includes('문서') || title.includes('documentation')) {
+            issueType = 'docs';
+            priority = 'low';
+            estimatedTime = '0.5-1일';
+          } else if (title.includes('[question]') || title.includes('질문') || title.includes('문의')) {
+            issueType = 'question';
+            priority = 'low';
+            estimatedTime = '즉시';
+          }
+          
+          // 우선순위 재조정
+          if (title.includes('urgent') || title.includes('critical') || title.includes('긴급')) {
+            priority = 'critical';
+          } else if (title.includes('high') || title.includes('중요')) {
+            priority = 'high';
+          } else if (title.includes('low') || title.includes('minor')) {
+            priority = 'low';
+          }
+          
+          // 복잡도 분석
+          let complexity = 'medium';
+          if (body.length > 500 || title.includes('complex') || title.includes('복잡')) {
+            complexity = 'high';
+            estimatedTime = '3-7일';
+          } else if (body.length < 100 || title.includes('simple') || title.includes('간단')) {
+            complexity = 'low';
+            estimatedTime = '0.5-1일';
+          }
+          
+          return {
+            issueType,
+            priority,
+            complexity,
+            estimatedTime,
+            hasScreenshot: body.includes('![') || body.includes('screenshot'),
+            hasSteps: body.includes('1.') || body.includes('단계'),
+            hasExpected: body.includes('expected') || body.includes('예상') || body.includes('기대')
+          };
+
+    - name: 💬 환영 댓글 작성
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const analysis = ${{ steps.analyze.outputs.result }};
+          const issue = context.payload.issue;
+          
+          // 이슈 타입별 이모지 및 메시지
+          const typeConfig = {
+            bug: { emoji: '🐛', title: '버그 신고', color: 'red' },
+            feature: { emoji: '✨', title: '기능 요청', color: 'green' },
+            task: { emoji: '📋', title: '작업 요청', color: 'blue' },
+            docs: { emoji: '📚', title: '문서 요청', color: 'yellow' },
+            question: { emoji: '❓', title: '질문', color: 'purple' },
+            general: { emoji: '💡', title: '일반 이슈', color: 'gray' }
+          };
+          
+          const config = typeConfig[analysis.issueType] || typeConfig.general;
+          
+          // 우선순위별 메시지
+          const priorityConfig = {
+            critical: { emoji: '🚨', message: '긴급 처리가 필요합니다' },
+            high: { emoji: '⚡', message: '높은 우선순위로 처리됩니다' },
+            medium: { emoji: '📊', message: '일반적인 우선순위로 처리됩니다' },
+            low: { emoji: '📝', message: '낮은 우선순위로 처리됩니다' }
+          };
+          
+          const priorityInfo = priorityConfig[analysis.priority] || priorityConfig.medium;
+          
+          // 체크리스트 생성
+          let checklist = [];
+          if (analysis.issueType === 'bug') {
+            checklist = [
+              '버그 재현 단계가 명확한가요?',
+              '예상 결과와 실제 결과가 설명되어 있나요?',
+              '환경 정보(OS, 브라우저, 버전 등)가 포함되어 있나요?',
+              '스크린샷이나 로그가 첨부되어 있나요?'
+            ];
+          } else if (analysis.issueType === 'feature') {
+            checklist = [
+              '기능의 목적과 필요성이 설명되어 있나요?',
+              '구체적인 요구사항이 명시되어 있나요?',
+              '사용자 시나리오가 포함되어 있나요?',
+              '기대하는 결과가 명확한가요?'
+            ];
+          } else {
+            checklist = [
+              '요청 사항이 명확하게 설명되어 있나요?',
+              '필요한 정보가 충분히 제공되어 있나요?',
+              '예상 결과가 명시되어 있나요?'
+            ];
+          }
+          
+          const comment = `
+          ## ${config.emoji} ${config.title} 접수 완료
+          
+          안녕하세요 @${issue.user.login}님! 이슈를 생성해 주셔서 감사합니다.
+          
+          ### 📊 이슈 분석 결과
+          - **타입**: ${config.title}
+          - **우선순위**: ${priorityInfo.emoji} ${analysis.priority.toUpperCase()} - ${priorityInfo.message}
+          - **복잡도**: ${analysis.complexity.toUpperCase()}
+          - **예상 처리 시간**: ${analysis.estimatedTime}
+          
+          ### ✅ 체크리스트
+          ${checklist.map(item => `- [ ] ${item}`).join('\n')}
+          
+          ### 📋 추가 정보
+          ${analysis.hasScreenshot ? '✅ 스크린샷 포함됨' : '❌ 스크린샷 미포함 (가능하면 추가해주세요)'}
+          ${analysis.hasSteps ? '✅ 단계별 설명 포함됨' : '❌ 단계별 설명 미포함 (재현 단계를 추가해주세요)'}
+          ${analysis.hasExpected ? '✅ 예상 결과 포함됨' : '❌ 예상 결과 미포함 (기대하는 결과를 추가해주세요)'}
+          
+          ### 🔄 다음 단계
+          1. 🏷️ 적절한 라벨이 자동으로 추가됩니다
+          2. 👥 담당자가 자동으로 할당됩니다
+          3. 📝 개발팀에서 검토 후 응답드립니다
+          
+          ### 💡 도움말
+          - 추가 정보가 필요하면 언제든 댓글로 남겨주세요
+          - 이슈 상태는 라벨을 통해 확인할 수 있습니다
+          - 긴급한 사항은 \`urgent\` 라벨을 추가해주세요
+          
+          감사합니다! 🙏
+          `;
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+    - name: 🎯 이슈 타입별 특별 안내
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const analysis = ${{ steps.analyze.outputs.result }};
+          const issue = context.payload.issue;
+          
+          let specialComment = '';
+          
+          if (analysis.issueType === 'bug' && analysis.priority === 'critical') {
+            specialComment = `
+            ## 🚨 긴급 버그 알림
+            
+            이 이슈는 긴급 버그로 분류되었습니다.
+            
+            ### 즉시 확인 사항
+            - [ ] 프로덕션 환경에 영향을 주는가?
+            - [ ] 사용자 데이터 손실 위험이 있는가?
+            - [ ] 보안 취약점과 관련이 있는가?
+            - [ ] 서비스 중단을 야기하는가?
+            
+            **담당자가 즉시 확인하여 대응할 예정입니다.**
+            `;
+          } else if (analysis.issueType === 'feature' && analysis.complexity === 'high') {
+            specialComment = `
+            ## 🏗️ 복잡한 기능 요청
+            
+            이 기능 요청은 복잡도가 높은 것으로 분석되었습니다.
+            
+            ### 검토 사항
+            - 기술적 타당성 검토
+            - 리소스 및 일정 계획
+            - 아키텍처 영향도 분석
+            - 사용자 경험 설계
+            
+            **상세한 기획 및 설계 단계를 거쳐 진행될 예정입니다.**
+            `;
+          } else if (analysis.issueType === 'question') {
+            specialComment = `
+            ## ❓ 질문 답변 안내
+            
+            질문해 주셔서 감사합니다!
+            
+            ### 빠른 답변을 위한 팁
+            - 구체적인 상황을 설명해주세요
+            - 에러 메시지가 있다면 전체 내용을 공유해주세요
+            - 시도해본 방법들을 알려주세요
+            - 사용 중인 환경 정보를 포함해주세요
+            
+            **보통 24시간 내에 답변드립니다.**
+            `;
+          }
+          
+          if (specialComment) {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: specialComment
+            });
+          }
+
+    - name: 📊 이슈 통계 업데이트
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const analysis = ${{ steps.analyze.outputs.result }};
+          
+          // 이슈 통계 댓글 (월별 요약)
+          const now = new Date();
+          const month = now.toLocaleString('ko-KR', { month: 'long' });
+          
+          const statsComment = `
+          ## 📈 ${month} 이슈 현황
+          
+          새로운 이슈가 등록되어 월별 통계를 업데이트합니다.
+          
+          ### 이번 달 주요 지표
+          - 📝 새 이슈: +1
+          - 🏷️ 타입: ${analysis.issueType}
+          - ⚡ 우선순위: ${analysis.priority}
+          
+          ### 💪 함께 만들어가는 프로젝트
+          여러분의 소중한 피드백과 기여로 프로젝트가 발전하고 있습니다.
+          
+          감사합니다! 🎉
+          `;
+          
+          // 통계 댓글은 조건부로 추가 (너무 많은 댓글 방지)
+          const shouldAddStats = Math.random() < 0.1; // 10% 확률로만 추가
+          
+          if (shouldAddStats) {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: statsComment
+            });
+          } 

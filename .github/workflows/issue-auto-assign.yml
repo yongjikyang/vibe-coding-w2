@@ -1,0 +1,249 @@
+name: 👥 이슈 자동 할당
+
+on:
+  issues:
+    types: [opened, reopened]
+
+jobs:
+  auto-assign-issue:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 🔍 이슈 분석 및 할당
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const issue = context.payload.issue;
+          const title = issue.title.toLowerCase();
+          const body = issue.body || '';
+          const labels = issue.labels.map(label => label.name);
+          
+          // 팀 멤버 정의 (실제 GitHub 사용자명으로 변경 필요)
+          const teamMembers = {
+            backend: ['backend-dev1', 'backend-dev2'], // 실제 GitHub 사용자명으로 변경
+            frontend: ['frontend-dev1', 'frontend-dev2'], // 실제 GitHub 사용자명으로 변경
+            devops: ['devops-dev1'], // 실제 GitHub 사용자명으로 변경
+            docs: ['tech-writer1'], // 실제 GitHub 사용자명으로 변경
+            qa: ['qa-engineer1'], // 실제 GitHub 사용자명으로 변경
+            pm: ['product-manager1'], // 실제 GitHub 사용자명으로 변경
+            leads: ['team-lead1', 'senior-dev1'], // 실제 GitHub 사용자명으로 변경
+            all: ['backend-dev1', 'frontend-dev1', 'devops-dev1', 'tech-writer1'] // 모든 팀원
+          };
+          
+          let assignees = [];
+          let issueType = 'general';
+          let priority = 'medium';
+          let area = 'general';
+          
+          // 이슈 타입 분석
+          if (title.includes('[bug]') || title.includes('bug') || title.includes('error') || title.includes('문제') || title.includes('오류')) {
+            issueType = 'bug';
+            priority = 'high';
+          } else if (title.includes('[feature]') || title.includes('기능') || title.includes('추가') || title.includes('개발')) {
+            issueType = 'feature';
+            priority = 'medium';
+          } else if (title.includes('[docs]') || title.includes('문서') || title.includes('documentation')) {
+            issueType = 'docs';
+            priority = 'low';
+            area = 'docs';
+          } else if (title.includes('[question]') || title.includes('질문') || title.includes('문의')) {
+            issueType = 'question';
+            priority = 'low';
+          } else if (title.includes('[task]') || title.includes('작업')) {
+            issueType = 'task';
+            priority = 'medium';
+          }
+          
+          // 우선순위 재분석
+          if (title.includes('urgent') || title.includes('critical') || title.includes('긴급') || title.includes('중요')) {
+            priority = 'critical';
+          } else if (title.includes('high') || title.includes('높음')) {
+            priority = 'high';
+          } else if (title.includes('low') || title.includes('낮음') || title.includes('minor')) {
+            priority = 'low';
+          }
+          
+          // 영역 분석
+          if (title.includes('backend') || title.includes('api') || title.includes('server') || title.includes('백엔드') || title.includes('서버')) {
+            area = 'backend';
+          } else if (title.includes('frontend') || title.includes('ui') || title.includes('ux') || title.includes('프론트') || title.includes('화면')) {
+            area = 'frontend';
+          } else if (title.includes('deploy') || title.includes('ci') || title.includes('cd') || title.includes('docker') || title.includes('배포')) {
+            area = 'devops';
+          } else if (title.includes('test') || title.includes('테스트') || title.includes('qa')) {
+            area = 'qa';
+          }
+          
+          // 할당 로직
+          if (priority === 'critical') {
+            // 긴급 이슈는 팀 리드에게 할당
+            assignees = [teamMembers.leads[0]];
+          } else if (area === 'backend') {
+            // 백엔드 이슈는 백엔드 팀에게 라운드 로빈
+            const backendMember = teamMembers.backend[Math.floor(Math.random() * teamMembers.backend.length)];
+            assignees = [backendMember];
+          } else if (area === 'frontend') {
+            // 프론트엔드 이슈는 프론트엔드 팀에게 라운드 로빈
+            const frontendMember = teamMembers.frontend[Math.floor(Math.random() * teamMembers.frontend.length)];
+            assignees = [frontendMember];
+          } else if (area === 'devops') {
+            // DevOps 이슈는 DevOps 팀에게
+            assignees = [teamMembers.devops[0]];
+          } else if (area === 'docs') {
+            // 문서 이슈는 문서 담당자에게
+            assignees = [teamMembers.docs[0]];
+          } else if (area === 'qa') {
+            // QA 이슈는 QA 팀에게
+            assignees = [teamMembers.qa[0]];
+          } else if (issueType === 'feature') {
+            // 기능 요청은 PM과 개발자에게
+            const devMember = teamMembers.all[Math.floor(Math.random() * teamMembers.all.length)];
+            assignees = [teamMembers.pm[0], devMember];
+          } else if (issueType === 'question') {
+            // 질문은 팀 리드에게
+            assignees = [teamMembers.leads[Math.floor(Math.random() * teamMembers.leads.length)]];
+          } else {
+            // 일반 이슈는 전체 팀에서 라운드 로빈
+            const randomMember = teamMembers.all[Math.floor(Math.random() * teamMembers.all.length)];
+            assignees = [randomMember];
+          }
+          
+          // 중복 제거
+          assignees = [...new Set(assignees)];
+          
+          // 이슈 작성자는 할당에서 제외
+          assignees = assignees.filter(assignee => assignee !== issue.user.login);
+          
+          // 할당 실행
+          try {
+            if (assignees.length > 0) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                assignees: assignees
+              });
+              
+              // 할당 결과 댓글
+              const assignmentComment = `
+              ## 👥 담당자 자동 할당 완료
+              
+              다음 분들이 이 이슈의 담당자로 할당되었습니다:
+              ${assignees.map(assignee => `- @${assignee}`).join('\n')}
+              
+              ### 📋 할당 기준
+              - **이슈 타입**: ${issueType}
+              - **우선순위**: ${priority}
+              - **영역**: ${area}
+              - **할당 방식**: ${priority === 'critical' ? '긴급 이슈 - 팀 리드 할당' : 
+                                area !== 'general' ? '전문 영역 기반 할당' : '라운드 로빈 할당'}
+              
+              ### 📞 담당자 안내
+              ${assignees.map(assignee => `@${assignee}`).join(', ')}님, 이 이슈를 검토해 주세요.
+              
+              - 🔍 **1단계**: 이슈 내용 검토 및 이해
+              - 💬 **2단계**: 추가 정보 필요시 질문 댓글 작성
+              - 🏷️ **3단계**: 적절한 라벨 추가
+              - 📅 **4단계**: 예상 일정 및 마일스톤 설정
+              - 🚀 **5단계**: 작업 시작 또는 다른 담당자에게 재할당
+              
+              ### ⏰ 응답 기한
+              ${priority === 'critical' ? '**즉시 응답** (1시간 내)' :
+                priority === 'high' ? '**24시간 내** 응답' :
+                priority === 'medium' ? '**48시간 내** 응답' :
+                '**72시간 내** 응답'}
+              
+              감사합니다! 🙏
+              `;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: assignmentComment
+              });
+              
+              // 긴급 이슈인 경우 추가 알림
+              if (priority === 'critical') {
+                const urgentComment = `
+                ## 🚨 긴급 이슈 알림
+                
+                이 이슈는 **긴급 처리**가 필요한 것으로 분류되었습니다.
+                
+                ### 즉시 확인 사항
+                - [ ] 프로덕션 환경 영향도 확인
+                - [ ] 임시 대응 방안 수립
+                - [ ] 관련 팀원들에게 알림
+                - [ ] 상급자 보고 (필요시)
+                
+                **담당자는 즉시 대응해 주시기 바랍니다.**
+                
+                ---
+                
+                📞 **긴급 연락처**: [Slack 채널 또는 연락처 정보]
+                `;
+                
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: urgentComment
+                });
+              }
+              
+              // 복잡한 기능 요청인 경우 PM 멘션
+              if (issueType === 'feature' && body.length > 500) {
+                const pmComment = `
+                ## 🎯 복잡한 기능 요청 감지
+                
+                이 기능 요청은 상당히 복잡한 것으로 분석되었습니다.
+                
+                @${teamMembers.pm[0]} PM님, 다음 사항을 검토해 주세요:
+                
+                ### 기획 검토 사항
+                - [ ] 비즈니스 요구사항 명확화
+                - [ ] 사용자 스토리 작성
+                - [ ] 우선순위 및 일정 계획
+                - [ ] 리소스 할당 계획
+                - [ ] 기술적 타당성 검토
+                
+                ### 다음 단계
+                1. 요구사항 분석 회의 일정 조율
+                2. 기술팀과 협의
+                3. 상세 기획서 작성
+                4. 개발 일정 수립
+                
+                감사합니다! 📋
+                `;
+                
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: pmComment
+                });
+              }
+            }
+          } catch (error) {
+            console.log('담당자 할당 중 오류 발생:', error.message);
+            
+            // 오류 발생 시 알림 댓글
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `
+              ## ⚠️ 자동 할당 실패
+              
+              담당자 자동 할당 중 오류가 발생했습니다.
+              
+              ### 수동 할당 안내
+              - 이슈 타입: **${issueType}**
+              - 우선순위: **${priority}**
+              - 추천 담당자: ${assignees.length > 0 ? assignees.map(a => `@${a}`).join(', ') : '미정'}
+              
+              관리자가 수동으로 담당자를 할당해 주세요.
+              
+              **오류 내용**: ${error.message}
+              `
+            });
+          } 

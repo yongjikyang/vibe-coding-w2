@@ -1,0 +1,102 @@
+name: 🏷️ 이슈 자동 라벨링
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+
+jobs:
+  issue-labeler:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 🔍 이슈 분석 및 라벨링
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const issue = context.payload.issue;
+          const title = issue.title.toLowerCase();
+          const body = (issue.body || '').toLowerCase();
+          
+          let labels = [];
+          
+          // 타입별 라벨
+          if (title.includes('[bug]') || title.includes('bug') || title.includes('error') || title.includes('문제') || title.includes('오류')) {
+            labels.push('type:bug');
+          } else if (title.includes('[feature]') || title.includes('기능') || title.includes('추가') || title.includes('feature')) {
+            labels.push('type:feature');
+          } else if (title.includes('[docs]') || title.includes('문서') || title.includes('documentation')) {
+            labels.push('type:docs');
+          } else if (title.includes('[question]') || title.includes('질문') || title.includes('문의')) {
+            labels.push('type:question');
+          } else if (title.includes('[task]') || title.includes('작업') || title.includes('task')) {
+            labels.push('type:task');
+          } else if (title.includes('[enhancement]') || title.includes('개선') || title.includes('enhancement')) {
+            labels.push('type:enhancement');
+          }
+          
+          // 우선순위 라벨
+          if (title.includes('urgent') || title.includes('critical') || title.includes('긴급') || title.includes('중요')) {
+            labels.push('priority:high');
+          } else if (title.includes('low') || title.includes('낮음') || title.includes('minor')) {
+            labels.push('priority:low');
+          } else {
+            labels.push('priority:medium');
+          }
+          
+          // 영역별 라벨
+          if (title.includes('backend') || title.includes('api') || title.includes('server') || title.includes('백엔드')) {
+            labels.push('area:backend');
+          }
+          if (title.includes('frontend') || title.includes('ui') || title.includes('ux') || title.includes('프론트')) {
+            labels.push('area:frontend');
+          }
+          if (title.includes('docs') || title.includes('문서') || title.includes('documentation')) {
+            labels.push('area:docs');
+          }
+          if (title.includes('ci') || title.includes('cd') || title.includes('deploy') || title.includes('배포')) {
+            labels.push('area:ci');
+          }
+          
+          // 특수 상황 라벨
+          if (body.includes('screenshot') || body.includes('스크린샷') || body.includes('![')) {
+            labels.push('has-screenshot');
+          }
+          if (body.includes('reproduce') || body.includes('재현') || body.includes('steps')) {
+            labels.push('has-reproduction');
+          }
+          if (body.length > 1000) {
+            labels.push('detailed-description');
+          }
+          
+          // 중복 제거
+          labels = [...new Set(labels)];
+          
+          try {
+            // 라벨 추가
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labels
+              });
+              
+              // 라벨링 결과 댓글
+              const comment = `
+              ## 🏷️ 자동 라벨링 완료
+              
+              다음 라벨들이 자동으로 추가되었습니다:
+              ${labels.map(label => `\`${label}\``).join(', ')}
+              
+              라벨이 잘못 설정된 경우 수동으로 수정해 주세요! 🙏
+              `;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+          } catch (error) {
+            console.log('라벨링 중 오류 발생:', error.message);
+          } 

@@ -1,0 +1,196 @@
+name: 🏷️ PR 자동 라벨링
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  labeler:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📥 코드 체크아웃
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 🔍 변경 사항 분석
+      id: analyze
+      run: |
+        # 변경된 파일들 분석
+        CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+        
+        # 영역별 파일 수 계산
+        BACKEND_FILES=$(echo "$CHANGED_FILES" | grep -E "^backend/" | wc -l)
+        FRONTEND_FILES=$(echo "$CHANGED_FILES" | grep -E "^frontend/" | wc -l)
+        DOCS_FILES=$(echo "$CHANGED_FILES" | grep -E "^docs/|\.md$" | wc -l)
+        TEST_FILES=$(echo "$CHANGED_FILES" | grep -E "test_|_test\.py$|^tests/" | wc -l)
+        CONFIG_FILES=$(echo "$CHANGED_FILES" | grep -E "\.yml$|\.yaml$|\.json$|requirements\.txt$|Dockerfile|\.env" | wc -l)
+        GITHUB_FILES=$(echo "$CHANGED_FILES" | grep -E "^\.github/" | wc -l)
+        
+        # 총 변경 파일 수
+        TOTAL_FILES=$(echo "$CHANGED_FILES" | wc -l)
+        
+        # 변경된 라인 수 계산
+        LINES_ADDED=$(git diff --numstat ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | awk '{sum+=$1} END {print sum}')
+        LINES_DELETED=$(git diff --numstat ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | awk '{sum+=$2} END {print sum}')
+        
+        echo "backend_files=$BACKEND_FILES" >> $GITHUB_OUTPUT
+        echo "frontend_files=$FRONTEND_FILES" >> $GITHUB_OUTPUT
+        echo "docs_files=$DOCS_FILES" >> $GITHUB_OUTPUT
+        echo "test_files=$TEST_FILES" >> $GITHUB_OUTPUT
+        echo "config_files=$CONFIG_FILES" >> $GITHUB_OUTPUT
+        echo "github_files=$GITHUB_FILES" >> $GITHUB_OUTPUT
+        echo "total_files=$TOTAL_FILES" >> $GITHUB_OUTPUT
+        echo "lines_added=$LINES_ADDED" >> $GITHUB_OUTPUT
+        echo "lines_deleted=$LINES_DELETED" >> $GITHUB_OUTPUT
+
+    - name: 🏷️ 라벨 자동 추가
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const backendFiles = parseInt('${{ steps.analyze.outputs.backend_files }}');
+          const frontendFiles = parseInt('${{ steps.analyze.outputs.frontend_files }}');
+          const docsFiles = parseInt('${{ steps.analyze.outputs.docs_files }}');
+          const testFiles = parseInt('${{ steps.analyze.outputs.test_files }}');
+          const configFiles = parseInt('${{ steps.analyze.outputs.config_files }}');
+          const githubFiles = parseInt('${{ steps.analyze.outputs.github_files }}');
+          const totalFiles = parseInt('${{ steps.analyze.outputs.total_files }}');
+          const linesAdded = parseInt('${{ steps.analyze.outputs.lines_added }}');
+          const linesDeleted = parseInt('${{ steps.analyze.outputs.lines_deleted }}');
+          
+          let labels = [];
+          
+          // 영역별 라벨
+          if (backendFiles > 0) labels.push('area:backend');
+          if (frontendFiles > 0) labels.push('area:frontend');
+          if (docsFiles > 0) labels.push('area:docs');
+          if (testFiles > 0) labels.push('area:test');
+          if (configFiles > 0) labels.push('area:config');
+          if (githubFiles > 0) labels.push('area:ci');
+          
+          // 크기별 라벨
+          if (totalFiles <= 3 && (linesAdded + linesDeleted) <= 50) {
+            labels.push('size:XS');
+          } else if (totalFiles <= 8 && (linesAdded + linesDeleted) <= 200) {
+            labels.push('size:S');
+          } else if (totalFiles <= 15 && (linesAdded + linesDeleted) <= 500) {
+            labels.push('size:M');
+          } else if (totalFiles <= 30 && (linesAdded + linesDeleted) <= 1000) {
+            labels.push('size:L');
+          } else {
+            labels.push('size:XL');
+          }
+          
+          // PR 제목 기반 타입 라벨
+          const title = context.payload.pull_request.title.toLowerCase();
+          const body = context.payload.pull_request.body || '';
+          
+          if (title.includes('[feat]') || title.includes('feature') || title.includes('add')) {
+            labels.push('type:feature');
+          } else if (title.includes('[fix]') || title.includes('bug') || title.includes('fix')) {
+            labels.push('type:bug');
+          } else if (title.includes('[refactor]') || title.includes('refactor')) {
+            labels.push('type:refactor');
+          } else if (title.includes('[docs]') || title.includes('documentation')) {
+            labels.push('type:docs');
+          } else if (title.includes('[test]') || title.includes('test')) {
+            labels.push('type:test');
+          } else if (title.includes('[chore]') || title.includes('chore')) {
+            labels.push('type:chore');
+          } else if (title.includes('[style]') || title.includes('style')) {
+            labels.push('type:style');
+          }
+          
+          // 우선순위 라벨 (키워드 기반)
+          if (title.includes('urgent') || title.includes('critical') || title.includes('hotfix')) {
+            labels.push('priority:high');
+          } else if (title.includes('minor') || title.includes('small')) {
+            labels.push('priority:low');
+          } else {
+            labels.push('priority:medium');
+          }
+          
+          // 특수 상황 라벨
+          if (testFiles === 0 && (backendFiles > 0 || frontendFiles > 0)) {
+            labels.push('needs-tests');
+          }
+          
+          if (docsFiles === 0 && (backendFiles > 0 || frontendFiles > 0)) {
+            labels.push('needs-docs');
+          }
+          
+          if (context.payload.pull_request.draft) {
+            labels.push('status:draft');
+          } else {
+            labels.push('status:ready');
+          }
+          
+          // 라벨 중복 제거
+          labels = [...new Set(labels)];
+          
+          try {
+            // 기존 라벨 가져오기
+            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            
+            const currentLabelNames = currentLabels.map(label => label.name);
+            const newLabels = labels.filter(label => !currentLabelNames.includes(label));
+            
+            if (newLabels.length > 0) {
+              // 새 라벨 추가
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: newLabels
+              });
+              
+              // 라벨링 결과 댓글
+              const comment = `
+              ## 🏷️ 자동 라벨링 완료
+              
+              다음 라벨들이 자동으로 추가되었습니다:
+              ${newLabels.map(label => `\`${label}\``).join(', ')}
+              
+              ### 📊 분석 결과
+              - **총 변경 파일**: ${totalFiles}개
+              - **라인 변경**: +${linesAdded} / -${linesDeleted}
+              - **영향 영역**: ${[
+                backendFiles > 0 ? `백엔드(${backendFiles})` : null,
+                frontendFiles > 0 ? `프론트엔드(${frontendFiles})` : null,
+                docsFiles > 0 ? `문서(${docsFiles})` : null,
+                testFiles > 0 ? `테스트(${testFiles})` : null,
+                configFiles > 0 ? `설정(${configFiles})` : null,
+                githubFiles > 0 ? `CI/CD(${githubFiles})` : null
+              ].filter(Boolean).join(', ') || '기타'}
+              
+              라벨이 잘못 설정된 경우 수동으로 수정해 주세요! 🙏
+              `;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+          } catch (error) {
+            console.log('라벨링 중 오류 발생:', error.message);
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `
+              ## ⚠️ 자동 라벨링 실패
+              
+              라벨 자동 추가 중 오류가 발생했습니다.
+              수동으로 라벨을 추가해 주세요.
+              
+              오류 내용: ${error.message}
+              `
+            });
+          } 

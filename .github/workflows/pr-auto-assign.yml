@@ -1,0 +1,144 @@
+name: 👥 PR 자동 할당
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  auto-assign:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 📥 코드 체크아웃
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 🔍 변경된 파일 분석
+      id: file-analysis
+      run: |
+        # 변경된 파일들 분석
+        BACKEND_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E "^backend/" | wc -l)
+        FRONTEND_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E "^frontend/" | wc -l)
+        DOCS_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E "^docs/|\.md$" | wc -l)
+        TEST_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E "test_|_test\.py$" | wc -l)
+        CONFIG_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -E "\.yml$|\.yaml$|\.json$|requirements\.txt$|Dockerfile" | wc -l)
+        
+        echo "backend_changed=$BACKEND_CHANGED" >> $GITHUB_OUTPUT
+        echo "frontend_changed=$FRONTEND_CHANGED" >> $GITHUB_OUTPUT
+        echo "docs_changed=$DOCS_CHANGED" >> $GITHUB_OUTPUT
+        echo "test_changed=$TEST_CHANGED" >> $GITHUB_OUTPUT
+        echo "config_changed=$CONFIG_CHANGED" >> $GITHUB_OUTPUT
+
+    - name: 👤 담당자 자동 할당
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const backendChanged = ${{ steps.file-analysis.outputs.backend_changed }};
+          const frontendChanged = ${{ steps.file-analysis.outputs.frontend_changed }};
+          const docsChanged = ${{ steps.file-analysis.outputs.docs_changed }};
+          const testChanged = ${{ steps.file-analysis.outputs.test_changed }};
+          const configChanged = ${{ steps.file-analysis.outputs.config_changed }};
+          
+          // 팀 멤버 정의 (실제 GitHub 사용자명으로 변경 필요)
+          const teamMembers = {
+            backend: ['backend-dev1', 'backend-dev2'], // 실제 GitHub 사용자명으로 변경
+            frontend: ['frontend-dev1', 'frontend-dev2'], // 실제 GitHub 사용자명으로 변경
+            devops: ['devops-dev1'], // 실제 GitHub 사용자명으로 변경
+            docs: ['tech-writer1'], // 실제 GitHub 사용자명으로 변경
+            all: ['team-lead1', 'senior-dev1'] // 실제 GitHub 사용자명으로 변경
+          };
+          
+          let assignees = [];
+          let reviewers = [];
+          
+          // 변경 영역에 따른 할당 로직
+          if (backendChanged > 0) {
+            const backendReviewer = teamMembers.backend[Math.floor(Math.random() * teamMembers.backend.length)];
+            reviewers.push(backendReviewer);
+          }
+          
+          if (frontendChanged > 0) {
+            const frontendReviewer = teamMembers.frontend[Math.floor(Math.random() * teamMembers.frontend.length)];
+            reviewers.push(frontendReviewer);
+          }
+          
+          if (configChanged > 0) {
+            const devopsReviewer = teamMembers.devops[Math.floor(Math.random() * teamMembers.devops.length)];
+            reviewers.push(devopsReviewer);
+          }
+          
+          if (docsChanged > 0) {
+            const docsReviewer = teamMembers.docs[Math.floor(Math.random() * teamMembers.docs.length)];
+            reviewers.push(docsReviewer);
+          }
+          
+          // 대형 PR이거나 여러 영역 변경 시 시니어 개발자 추가
+          const totalFiles = backendChanged + frontendChanged + docsChanged + configChanged;
+          if (totalFiles > 10 || (backendChanged > 0 && frontendChanged > 0)) {
+            const seniorReviewer = teamMembers.all[Math.floor(Math.random() * teamMembers.all.length)];
+            reviewers.push(seniorReviewer);
+          }
+          
+          // 중복 제거
+          reviewers = [...new Set(reviewers)];
+          
+          // PR 작성자는 리뷰어에서 제외
+          reviewers = reviewers.filter(reviewer => reviewer !== context.payload.pull_request.user.login);
+          
+          // 리뷰어가 없으면 기본 리뷰어 할당
+          if (reviewers.length === 0) {
+            reviewers = [teamMembers.all[0]];
+          }
+          
+          try {
+            // 리뷰어 요청
+            if (reviewers.length > 0) {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                reviewers: reviewers
+              });
+              
+              // 할당 결과 댓글
+              const comment = `
+              ## 👥 리뷰어 자동 할당 완료
+              
+              다음 분들이 리뷰어로 할당되었습니다:
+              ${reviewers.map(reviewer => `- @${reviewer}`).join('\n')}
+              
+              ### 📋 할당 기준
+              - 백엔드 변경: ${backendChanged > 0 ? '✅' : '❌'}
+              - 프론트엔드 변경: ${frontendChanged > 0 ? '✅' : '❌'}
+              - 문서 변경: ${docsChanged > 0 ? '✅' : '❌'}
+              - 설정 변경: ${configChanged > 0 ? '✅' : '❌'}
+              - 테스트 변경: ${testChanged > 0 ? '✅' : '❌'}
+              
+              리뷰어 분들께서는 24시간 내 리뷰 부탁드립니다! 🙏
+              `;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+          } catch (error) {
+            console.log('리뷰어 할당 중 오류 발생:', error.message);
+            
+            // 오류 발생 시 알림 댓글
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `
+              ## ⚠️ 자동 할당 실패
+              
+              리뷰어 자동 할당 중 오류가 발생했습니다.
+              관리자에게 문의하거나 수동으로 리뷰어를 지정해 주세요.
+              
+              오류 내용: ${error.message}
+              `
+            });
+          } 
