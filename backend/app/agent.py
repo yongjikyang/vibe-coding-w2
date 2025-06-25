@@ -43,7 +43,7 @@ def create_agent():
 
 def search_products(query: Optional[str]) -> str:
     """상품 검색 함수"""
-    if not query or query.strip() == "":
+    if query.strip() == "":
         return "검색어를 입력해주세요."
     
     try:
