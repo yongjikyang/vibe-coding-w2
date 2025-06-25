@@ -1,5 +1,8 @@
 # TASK-003: LangGraph Agent 구현 완료
 
+## PR 테스트 업데이트 🚀
+이 섹션은 GitHub Actions 워크플로우 테스트를 위해 추가되었습니다.
+
 ## 개요
 LangGraph를 사용한 React Agent 구현이 완료되었습니다. 이 Agent는 DuckDuckGo 검색을 통해 상품 정보를 찾고, Gemini LLM을 사용하여 사용자에게 유용한 정보를 제공합니다.
 
