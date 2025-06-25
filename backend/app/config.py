@@ -10,7 +10,7 @@ class Settings:
     
     # 서버 설정
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT"))  # 기본값 제거하여 None 발생 가능
+    PORT: int = int(os.getenv("PORT", "8000"))  # 기본값 "8000" 복원
     
     # 개발/운영 환경
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
